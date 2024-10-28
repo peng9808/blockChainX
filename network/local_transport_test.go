@@ -23,7 +23,7 @@ func TestSendMessage(t *testing.T) {
 	tra.Connect(trb)
 	trb.Connect(tra)
 
-	msg := []byte("hello world")
+	msg := []byte("hello web3")
 	assert.Nil(t, tra.SendMessage(trb.addr, msg))
 
 	rpc := <-trb.Consume()
