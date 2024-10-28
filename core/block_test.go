@@ -1,25 +1,46 @@
 package core
 
 import (
-	"fmt"
+	"github.com/peng9808/BlockchainX/crypto"
 	"github.com/peng9808/BlockchainX/types"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 )
 
-func TestBlockHash(t *testing.T) {
-	b := &Block{
-		Header: Header{
-			Version:   1,
-			PrevBlock: types.RandomHash(),
-			Timestamp: time.Now().UnixNano(),
-			Height:    10,
-		},
-		Transactions: []Transaction{},
+func randomBlock(height uint32) *Block {
+	header := &Header{
+		Version:       1,
+		PrevBlockHash: types.RandomHash(),
+		Height:        height,
+		Timestamp:     time.Now().UnixNano(),
+	}
+	tx := Transaction{
+		Data: []byte("foo"),
 	}
 
-	h := b.Hash()
-	fmt.Println(h)
-	assert.False(t, h.IsZero())
+	return NewBlock(header, []Transaction{tx})
+}
+
+func TestSignBlock(t *testing.T) {
+	privKey := crypto.GeneratePrivateKey()
+	b := randomBlock(0)
+
+	assert.Nil(t, b.Sign(privKey))
+	assert.NotNil(t, b.Signature)
+}
+
+func TestVerifyBlock(t *testing.T) {
+	privKey := crypto.GeneratePrivateKey()
+	b := randomBlock(0)
+
+	assert.Nil(t, b.Sign(privKey))
+	assert.Nil(t, b.Verify())
+
+	otherPrivKey := crypto.GeneratePrivateKey()
+	b.Validator = otherPrivKey.PublicKey()
+	assert.NotNil(t, b.Verify())
+
+	b.Height = 100
+	assert.NotNil(t, b.Verify())
 }
