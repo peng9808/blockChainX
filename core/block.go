@@ -16,6 +16,14 @@ type Header struct {
 	Nonce         uint64
 }
 
+func (h *Header) Bytes() []byte {
+	buf := &bytes.Buffer{}
+	enc := gob.NewEncoder(buf)
+	enc.Encode(h)
+
+	return buf.Bytes()
+}
+
 type Block struct {
 	*Header
 	Transactions []Transaction
@@ -30,6 +38,9 @@ func NewBlock(h *Header, txx []Transaction) *Block {
 		Header:       h,
 		Transactions: txx,
 	}
+}
+func (b *Block) AddTransaction(tx *Transaction) {
+	b.Transactions = append(b.Transactions, *tx)
 }
 
 func (b *Block) Sign(privKey crypto.PrivateKey) error {
@@ -60,10 +71,10 @@ func (b *Block) HeaderData() []byte {
 	return buf.Bytes()
 }
 
-func (b *Block) Hash(hasher Hasher[*Block]) types.Hash {
-
+func (b *Block) Hash(hasher Hasher[*Header]) types.Hash {
 	if b.hash.IsZero() {
-		b.hash = hasher.Hash(b)
+		b.hash = hasher.Hash(b.Header)
 	}
+
 	return b.hash
 }
