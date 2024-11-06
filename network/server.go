@@ -11,9 +11,11 @@ import (
 var defaultBlockTime = 5 * time.Second
 
 type ServerOpts struct {
-	Transports []Transport
-	BlockTime  time.Duration
-	PrivateKey *crypto.PrivateKey
+	RPCDecodeFunc RPCDecodeFunc
+	RPCProcessor  RPCProcessor
+	Transports    []Transport
+	BlockTime     time.Duration
+	PrivateKey    *crypto.PrivateKey
 }
 
 type Server struct {
@@ -29,7 +31,11 @@ func NewServer(opts ServerOpts) *Server {
 	if opts.BlockTime == time.Duration(0) {
 		opts.BlockTime = defaultBlockTime
 	}
-	return &Server{
+	if opts.RPCDecodeFunc == nil {
+		opts.RPCDecodeFunc = DefaultRPCDecodeFunc
+	}
+
+	s := &Server{
 		ServerOpts:  opts,
 		blockTime:   opts.BlockTime,
 		memPool:     NewTxPool(),
@@ -37,33 +43,61 @@ func NewServer(opts ServerOpts) *Server {
 		rpcCh:       make(chan RPC),
 		quitCh:      make(chan struct{}, 1),
 	}
+
+	// If we dont got any processor from the server options, we going to use
+	// the server as default.
+	if s.RPCProcessor == nil {
+		s.RPCProcessor = s
+	}
+
+	if s.isValidator {
+		go s.validatorLoop()
+	}
+
+	return s
 }
 
 func (s *Server) Start() {
 	s.initTransports()
-	ticker := time.NewTicker(s.blockTime)
 
 	for {
 		select {
 		case rpc := <-s.rpcCh:
-			fmt.Printf("%+v\n", rpc)
+			msg, err := s.RPCDecodeFunc(rpc)
+			if err != nil {
+				logrus.Error(err)
+			}
+			if err := s.RPCProcessor.ProcessMessage(msg); err != nil {
+				logrus.Error(err)
+			}
 		case <-s.quitCh:
 			break
-		case <-ticker.C:
-			if s.isValidator {
-				s.createNewBlock()
-			}
 		}
 	}
 
 	fmt.Println("Server shutdown")
 }
 
-func (s *Server) handleTransaction(tx *core.Transaction) error {
-	if err := tx.Verify(); err != nil {
-		return err
+func (s *Server) validatorLoop() {
+	ticker := time.NewTicker(s.blockTime)
+	for {
+		select {
+		case <-ticker.C:
+			s.createNewBlock()
+		}
+	}
+}
+
+func (s *Server) ProcessMessage(msg *DecodedMessage) error {
+	switch t := msg.Data.(type) {
+	case *core.Transaction:
+		return s.processTransaction(t)
 	}
 
+	return nil
+}
+
+func (s *Server) processTransaction(tx *core.Transaction) error {
 	hash := tx.Hash(core.TxHasher{})
 
 	if s.memPool.Has(hash) {
@@ -74,9 +108,18 @@ func (s *Server) handleTransaction(tx *core.Transaction) error {
 		return nil
 	}
 
+	if err := tx.Verify(); err != nil {
+		return err
+	}
+
+	tx.SetFirstSeen(time.Now().UnixNano())
+
 	logrus.WithFields(logrus.Fields{
-		"hash": hash,
+		"hash":           hash,
+		"mempool length": s.memPool.Len(),
 	}).Info("adding new tx to the mempool")
+
+	// TODO(@anthdm): broadcast this tx to peers
 
 	return s.memPool.Add(tx)
 }
