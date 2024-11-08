@@ -5,6 +5,7 @@ import (
 	"github.com/peng9808/BlockchainX/core"
 	"github.com/peng9808/BlockchainX/crypto"
 	"github.com/sirupsen/logrus"
+	"log"
 	"math/rand"
 	"strconv"
 	"time"
@@ -27,13 +28,17 @@ func main() {
 			time.Sleep(1 * time.Second)
 		}
 	}()
-
+	privKey := crypto.GeneratePrivateKey()
 	opts := network.ServerOpts{
+		PrivateKey: &privKey,
 		ID:         "LOCAL",
 		Transports: []network.Transport{trLocal},
 	}
 
-	s := network.NewServer(opts)
+	s, err := network.NewServer(opts)
+	if err != nil {
+		log.Fatal(err)
+	}
 	s.Start()
 }
 

@@ -2,11 +2,11 @@ package network
 
 import (
 	"bytes"
-	"crypto"
 	"encoding/hex"
-	"fmt"
 	"github.com/go-kit/log"
 	"github.com/peng9808/BlockchainX/core"
+	"github.com/peng9808/BlockchainX/crypto"
+	"github.com/peng9808/BlockchainX/types"
 	"github.com/sirupsen/logrus"
 	"os"
 	"time"
@@ -28,12 +28,13 @@ type Server struct {
 	ServerOpts
 	blockTime   time.Duration
 	memPool     *TxPool
+	chain       *core.Blockchain
 	isValidator bool
 	rpcCh       chan RPC
 	quitCh      chan struct{}
 }
 
-func NewServer(opts ServerOpts) *Server {
+func NewServer(opts ServerOpts) (*Server, error) {
 	if opts.BlockTime == time.Duration(0) {
 		opts.BlockTime = defaultBlockTime
 	}
@@ -45,11 +46,16 @@ func NewServer(opts ServerOpts) *Server {
 		opts.Logger = log.NewLogfmtLogger(os.Stderr)
 		opts.Logger = log.With(opts.Logger, "ID", opts.ID)
 	}
+	chain, err := core.NewBlockchain(genesisBlock())
+	if err != nil {
+		return nil, err
+	}
 
 	s := &Server{
 		ServerOpts:  opts,
 		blockTime:   opts.BlockTime,
 		memPool:     NewTxPool(),
+		chain:       chain,
 		isValidator: opts.PrivateKey != nil,
 		rpcCh:       make(chan RPC),
 		quitCh:      make(chan struct{}, 1),
@@ -65,7 +71,7 @@ func NewServer(opts ServerOpts) *Server {
 		go s.validatorLoop()
 	}
 
-	return s
+	return s, nil
 }
 
 func (s *Server) Start() {
@@ -91,6 +97,8 @@ func (s *Server) Start() {
 
 func (s *Server) validatorLoop() {
 	ticker := time.NewTicker(s.blockTime)
+	s.Logger.Log("msg", "Starting validator loop", "blockTime", s.BlockTime)
+
 	for {
 		select {
 		case <-ticker.C:
@@ -155,7 +163,21 @@ func (s *Server) broadcastTx(tx *core.Transaction) error {
 }
 
 func (s *Server) createNewBlock() error {
-	fmt.Println("creating a new block")
+	currentHeader, err := s.chain.GetHeader(s.chain.Height())
+	if err != nil {
+		return err
+	}
+	block, err := core.NewBlockFromPrevHeader(currentHeader, nil)
+	if err != nil {
+		return err
+	}
+	if err := block.Sign(*s.PrivateKey); err != nil {
+		return err
+	}
+	if err := s.chain.AddBlock(block); err != nil {
+		return err
+	}
+	s.Logger.Log("msg", "Add Block Success", "chain height", s.chain.Height())
 	return nil
 }
 
@@ -167,4 +189,15 @@ func (s *Server) initTransports() {
 			}
 		}(tr)
 	}
+}
+
+func genesisBlock() *core.Block {
+	header := &core.Header{
+		Version:   1,
+		DataHash:  types.Hash{},
+		Height:    0,
+		Timestamp: time.Now().UnixNano(),
+	}
+	b, _ := core.NewBlock(header, nil)
+	return b
 }
