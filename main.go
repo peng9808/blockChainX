@@ -29,6 +29,7 @@ func main() {
 	}()
 
 	opts := network.ServerOpts{
+		ID:         "LOCAL",
 		Transports: []network.Transport{trLocal},
 	}
 

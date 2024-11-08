@@ -3,15 +3,20 @@ package network
 import (
 	"bytes"
 	"crypto"
+	"encoding/hex"
 	"fmt"
+	"github.com/go-kit/log"
 	"github.com/peng9808/BlockchainX/core"
 	"github.com/sirupsen/logrus"
+	"os"
 	"time"
 )
 
 var defaultBlockTime = 5 * time.Second
 
 type ServerOpts struct {
+	ID            string
+	Logger        log.Logger
 	RPCDecodeFunc RPCDecodeFunc
 	RPCProcessor  RPCProcessor
 	Transports    []Transport
@@ -34,6 +39,11 @@ func NewServer(opts ServerOpts) *Server {
 	}
 	if opts.RPCDecodeFunc == nil {
 		opts.RPCDecodeFunc = DefaultRPCDecodeFunc
+	}
+
+	if opts.Logger == nil {
+		opts.Logger = log.NewLogfmtLogger(os.Stderr)
+		opts.Logger = log.With(opts.Logger, "ID", opts.ID)
 	}
 
 	s := &Server{
@@ -66,17 +76,17 @@ func (s *Server) Start() {
 		case rpc := <-s.rpcCh:
 			msg, err := s.RPCDecodeFunc(rpc)
 			if err != nil {
-				logrus.Error(err)
+				s.Logger.Log("error", err)
 			}
 			if err := s.RPCProcessor.ProcessMessage(msg); err != nil {
-				logrus.Error(err)
+				s.Logger.Log("error", err)
 			}
 		case <-s.quitCh:
 			break
 		}
 	}
 
-	fmt.Println("Server shutdown")
+	s.Logger.Log("msg", "Server is shutting down")
 }
 
 func (s *Server) validatorLoop() {
@@ -124,10 +134,11 @@ func (s *Server) processTransaction(tx *core.Transaction) error {
 
 	tx.SetFirstSeen(time.Now().UnixNano())
 
-	logrus.WithFields(logrus.Fields{
-		"hash":           hash,
-		"mempool length": s.memPool.Len(),
-	}).Info("adding new tx to the mempool")
+	s.Logger.Log(
+		"msg", "adding new tx to mempool",
+		"hash", hex.EncodeToString(hash[:]),
+		"mempoolLength", s.memPool.Len(),
+	)
 
 	go s.broadcastTx(tx)
 
